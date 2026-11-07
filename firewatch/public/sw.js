@@ -1,36 +1,15 @@
-// FireWatch service worker: app shell cache + last fire data available offline
-const VERSION = 'fw-v2';
-const SHELL = ['/', '/index.html', '/style.css', '/app.js', '/manifest.webmanifest', '/icons/icon-192.png', '/icons/icon.svg'];
-
-self.addEventListener('install', (e) => {
-  e.waitUntil(caches.open(VERSION).then((c) => c.addAll(SHELL)).then(() => self.skipWaiting()));
-});
+// FireWatch service worker: minimal on purpose.
+// It keeps the app installable but stores nothing: every request goes straight to the network.
+// On activation it also deletes any cache created by earlier versions.
+self.addEventListener('install', () => self.skipWaiting());
 
 self.addEventListener('activate', (e) => {
-  e.waitUntil(caches.keys().then((keys) => Promise.all(keys.filter((k) => k !== VERSION).map((k) => caches.delete(k))))
-    .then(() => self.clients.claim()));
-});
-
-self.addEventListener('fetch', (e) => {
-  const url = new URL(e.request.url);
-  if (e.request.method !== 'GET' || url.origin !== location.origin) return;
-
-  // Fire data: network first, fall back to the last copy when offline
-  if (url.pathname.startsWith('/api/')) {
-    e.respondWith(
-      fetch(e.request).then((res) => {
-        if (res.ok) { const copy = res.clone(); caches.open(VERSION).then((c) => c.put(e.request, copy)); }
-        return res;
-      }).catch(() => caches.match(e.request))
-    );
-    return;
-  }
-
-  // App shell: network first (updates show up immediately), cached copy when offline
-  e.respondWith(
-    fetch(e.request).then((res) => {
-      if (res.ok) { const copy = res.clone(); caches.open(VERSION).then((c) => c.put(e.request, copy)); }
-      return res;
-    }).catch(() => caches.match(e.request))
+  e.waitUntil(
+    caches.keys()
+      .then((keys) => Promise.all(keys.map((k) => caches.delete(k))))
+      .then(() => self.clients.claim())
   );
 });
+
+// No respondWith(): the browser handles the request normally (network, standard HTTP cache rules).
+self.addEventListener('fetch', () => {});
