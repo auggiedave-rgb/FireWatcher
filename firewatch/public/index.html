@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no" />
+  <meta name="theme-color" content="#0b0e14" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <title>FireWatch – Global active fires</title>
+  <link rel="manifest" href="manifest.webmanifest" />
+  <link rel="icon" href="icons/icon.svg" type="image/svg+xml" />
+  <link rel="apple-touch-icon" href="icons/icon-192.png" />
+  <script>window.CESIUM_BASE_URL = 'https://cdn.jsdelivr.net/npm/cesium@1.147.0/Build/Cesium/';</script>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/cesium@1.147.0/Build/Cesium/Widgets/widgets.css" />
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <div id="globe"></div>
+
+  <header id="topbar">
+    <div class="brand">
+      <span class="logo" aria-hidden="true"></span>
+      <div>
+        <h1>FireWatch</h1>
+        <p id="status">Loading…</p>
+      </div>
+    </div>
+    <div class="top-actions">
+      <button id="btnLocate" class="icon-btn" title="My location" aria-label="My location">◎</button>
+      <button id="btnRefresh" class="icon-btn" title="Refresh data" aria-label="Refresh data">↻</button>
+    </div>
+  </header>
+
+  <div id="legend" aria-live="polite"></div>
+  <div id="loader" hidden><div class="spinner"></div><span id="loaderText">Loading detections…</span></div>
+
+  <nav id="dock">
+    <button data-panel="filters" class="dock-btn"><span>⚙</span>Filters</button>
+    <button data-panel="hotspots" class="dock-btn"><span>🔥</span>Hotspots<b id="hotBadge" hidden></b></button>
+    <button data-panel="layers" class="dock-btn"><span>🌍</span>Layers</button>
+    <button data-panel="about" class="dock-btn"><span>ℹ</span>About</button>
+  </nav>
+
+  <!-- Bottom sheets -->
+  <section id="sheet" class="sheet" hidden>
+    <div class="sheet-handle"></div>
+    <button id="sheetClose" class="sheet-close" aria-label="Close">✕</button>
+
+    <div data-content="filters">
+      <h2>Filters</h2>
+      <label class="field-label">Time window</label>
+      <div class="seg" id="rangeSeg">
+        <button data-v="24">24 h</button><button data-v="48">48 h</button><button data-v="72">72 h</button><button data-v="168">7 days</button>
+      </div>
+
+      <label class="field-label">Satellites</label>
+      <div class="chips" id="srcChips">
+        <button data-v="VIIRS_NOAA20_NRT">VIIRS NOAA-20</button>
+        <button data-v="VIIRS_NOAA21_NRT">VIIRS NOAA-21</button>
+        <button data-v="VIIRS_SNPP_NRT">VIIRS S-NPP</button>
+        <button data-v="MODIS_NRT">MODIS Terra/Aqua</button>
+      </div>
+
+      <label class="field-label">Minimum confidence</label>
+      <div class="seg" id="confSeg">
+        <button data-v="0">All</button><button data-v="1">Nominal+</button><button data-v="2">High</button>
+      </div>
+
+      <label class="field-label">Minimum fire radiative power: <b id="frpVal"></b></label>
+      <input type="range" id="frpMin" min="0" max="6" step="1" />
+
+      <label class="field-label">Color by</label>
+      <div class="seg" id="colorSeg">
+        <button data-v="age">Age</button><button data-v="frp">Intensity (FRP)</button>
+      </div>
+    </div>
+
+    <div data-content="hotspots">
+      <h2>Hotspots</h2>
+      <div class="seg" id="regionSeg">
+        <button data-v="italy">Italy</button><button data-v="europe">Europe</button><button data-v="world">World</button>
+      </div>
+      <p class="hint" id="hotHint"></p>
+      <ol id="hotList"></ol>
+    </div>
+
+    <div data-content="layers">
+      <h2>Layers</h2>
+      <label class="field-label">Base imagery</label>
+      <select id="baseSelect"></select>
+      <p class="hint">“Blue Marble” is a cloud-free composite. “True color” is the real VIIRS image of that day: clouds and smoke plumes included.</p>
+      <label class="toggle"><input type="checkbox" id="nightToggle" /> Day/night shading with city lights</label>
+      <label class="toggle"><input type="checkbox" id="bordersToggle" /> Country borders</label>
+    </div>
+
+    <div data-content="about">
+      <h2>About the data</h2>
+      <p>Detections come from <b>NASA FIRMS</b> (Fire Information for Resource Management System). Thermal infrared sensors on polar-orbiting satellites flag pixels that are much hotter than their surroundings.</p>
+      <ul>
+        <li><b>VIIRS</b> (NOAA-20, NOAA-21, Suomi NPP): 375 m pixels, the most sensitive to small fires.</li>
+        <li><b>MODIS</b> (Terra, Aqua): 1 km pixels, longest historical record.</li>
+        <li>Each satellite passes over a given place roughly twice a day (day and night). Data usually arrives within 3 hours of the pass.</li>
+      </ul>
+      <h3>How to read a point</h3>
+      <ul>
+        <li>A point marks the <i>centre of a hot pixel</i>, not the exact fire position or its size.</li>
+        <li><b>FRP</b> (Fire Radiative Power, MW) measures how much heat the fire radiates: a proxy for its intensity.</li>
+        <li><b>Confidence</b> reflects how likely the detection is a real fire.</li>
+      </ul>
+      <h3>Limits</h3>
+      <ul>
+        <li>These are <i>thermal anomalies</i>: volcanoes, gas flares, industrial plants and hot surfaces can also appear.</li>
+        <li>Thick clouds and dense smoke can hide fires; no detection does not mean no fire.</li>
+        <li>For emergencies always rely on official channels (in Italy: Protezione Civile, Vigili del Fuoco – 115; in the EU: EFFIS / Copernicus EMS).</li>
+      </ul>
+      <p class="credits">Data: NASA FIRMS (LANCE / EOSDIS). Imagery: NASA GIBS (Blue Marble, Black Marble, VIIRS Corrected Reflectance). Globe: CesiumJS.</p>
+    </div>
+
+    <div data-content="detail">
+      <h2 id="dTitle">Detection</h2>
+      <dl id="dList" class="dl"></dl>
+      <div class="row-actions">
+        <button id="dFly" class="btn">Zoom here</button>
+        <a id="dFirms" class="btn ghost" target="_blank" rel="noopener">Open in FIRMS map</a>
+      </div>
+    </div>
+  </section>
+
+  <div id="toast" hidden></div>
+
+  <script src="https://cdn.jsdelivr.net/npm/cesium@1.147.0/Build/Cesium/Cesium.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
