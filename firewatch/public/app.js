@@ -61,7 +61,36 @@ function toast(msg, ms = 6000) {
 // ---------- Globe ----------
 Cesium.Ion.defaultAccessToken = undefined; // no Cesium ion services are used
 
-const tiling = new Cesium.GeographicTilingScheme();
+// NASA GIBS EPSG:4326 tile grid. It is NOT Cesium's default geographic grid: level 0 is 2x1 tiles of
+// 512 px at 0.5625 deg/px (a tile spans 288 deg, halving at each level), with origin at (-180, 90).
+// Matrix sizes per level: 2x1, 3x2, 5x3, 10x5, 20x10, 40x20, 80x40, 160x80, 320x160.
+// Same geometry as NASA's reference example (github.com/nasa-gibs/gibs-web-examples, Apache-2.0).
+const GIBS_LEVELS = [[2, 1], [3, 2], [5, 3], [10, 5], [20, 10], [40, 20], [80, 40], [160, 80], [320, 160]];
+const GIBS_TILE_RAD = Cesium.Math.toRadians(0.5625) * 512; // tile span at level 0, in radians
+function gibsTilingScheme() {
+  const scheme = new Cesium.GeographicTilingScheme();
+  const west0 = -Math.PI; const north0 = Math.PI / 2;
+  const span = (level) => GIBS_TILE_RAD / 2 ** level;
+  scheme.getNumberOfXTilesAtLevel = (level) => GIBS_LEVELS[level][0];
+  scheme.getNumberOfYTilesAtLevel = (level) => GIBS_LEVELS[level][1];
+  scheme.tileXYToRectangle = (x, y, level, result = new Cesium.Rectangle()) => {
+    const s = span(level);
+    result.west = west0 + x * s; result.east = west0 + (x + 1) * s;
+    result.north = north0 - y * s; result.south = north0 - (y + 1) * s;
+    return result;
+  };
+  scheme.tileXYToNativeRectangle = scheme.tileXYToRectangle;
+  scheme.positionToTileXY = (position, level, result = new Cesium.Cartesian2()) => {
+    if (!Cesium.Rectangle.contains(scheme.rectangle, position)) return undefined;
+    const [nx, ny] = GIBS_LEVELS[level];
+    const s = span(level);
+    result.x = Math.min(nx - 1, Math.floor((position.longitude - west0) / s));
+    result.y = Math.min(ny - 1, Math.floor((north0 - position.latitude) / s));
+    return result;
+  };
+  return scheme;
+}
+const tiling = gibsTilingScheme();
 function gibsProvider(layer, { time = 'default', matrixSet = '500m', ext = 'jpg', maxLevel = 7 } = {}) {
   return new Cesium.WebMapTileServiceImageryProvider({
     url: `${GIBS}/${layer}/default/${time}/{TileMatrixSet}/{TileMatrix}/{TileRow}/{TileCol}.${ext}`,

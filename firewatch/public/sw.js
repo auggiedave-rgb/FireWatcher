@@ -1,5 +1,5 @@
 // FireWatch service worker: app shell cache + last fire data available offline
-const VERSION = 'fw-v1';
+const VERSION = 'fw-v2';
 const SHELL = ['/', '/index.html', '/style.css', '/app.js', '/manifest.webmanifest', '/icons/icon-192.png', '/icons/icon.svg'];
 
 self.addEventListener('install', (e) => {
@@ -26,14 +26,11 @@ self.addEventListener('fetch', (e) => {
     return;
   }
 
-  // App shell: stale-while-revalidate
+  // App shell: network first (updates show up immediately), cached copy when offline
   e.respondWith(
-    caches.match(e.request).then((cached) => {
-      const net = fetch(e.request).then((res) => {
-        if (res.ok) { const copy = res.clone(); caches.open(VERSION).then((c) => c.put(e.request, copy)); }
-        return res;
-      }).catch(() => cached);
-      return cached || net;
-    })
+    fetch(e.request).then((res) => {
+      if (res.ok) { const copy = res.clone(); caches.open(VERSION).then((c) => c.put(e.request, copy)); }
+      return res;
+    }).catch(() => caches.match(e.request))
   );
 });
