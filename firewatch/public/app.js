@@ -123,6 +123,64 @@ globe.maximumScreenSpaceError = 1.5;
 scene.fog.enabled = false;
 scene.screenSpaceCameraController.minimumZoomDistance = 30000;     // ~30 km: regional zoom, not street level
 scene.screenSpaceCameraController.maximumZoomDistance = 40000000;
+// The Earth's centre must always stay at the centre of the screen. Tilt/look gestures are disabled
+// and, before every frame, the camera is re-aimed at the Earth's centre with north up. Cesium's
+// zoom-towards-the-pointer (and any residual tilt) can otherwise push the globe off-centre for good.
+scene.screenSpaceCameraController.enableTilt = false;
+scene.screenSpaceCameraController.enableLook = false;
+(function lockCameraToEarthCentre() {
+  const dir = new Cesium.Cartesian3(); const up = new Cesium.Cartesian3(); const tmp = new Cesium.Cartesian3();
+  const EPS = 1e-6;
+  scene.preUpdate.addEventListener(() => {
+    const cam = viewer.camera;
+    const pos = cam.positionWC;
+    if (Cesium.Cartesian3.magnitude(pos) < 1000) return;
+    Cesium.Cartesian3.normalize(Cesium.Cartesian3.negate(pos, dir), dir);          // towards Earth's centre
+    const d = Cesium.Cartesian3.dot(Cesium.Cartesian3.UNIT_Z, dir);
+    Cesium.Cartesian3.subtract(Cesium.Cartesian3.UNIT_Z, Cesium.Cartesian3.multiplyByScalar(dir, d, tmp), up); // north, ⟂ to dir
+    if (Cesium.Cartesian3.magnitude(up) < 1e-3) Cesium.Cartesian3.clone(cam.upWC, up); // exactly over a pole: keep current up
+    Cesium.Cartesian3.normalize(up, up);
+    const aligned = Cesium.Cartesian3.dot(cam.directionWC, dir) > 1 - EPS && Cesium.Cartesian3.dot(cam.upWC, up) > 1 - EPS;
+    if (aligned) return;
+    cam.setView({ destination: Cesium.Cartesian3.clone(pos), orientation: { direction: Cesium.Cartesian3.clone(dir), up: Cesium.Cartesian3.clone(up) } });
+  });
+})();
+// Zoom is handled here instead of by Cesium (which zooms towards the pointer and ignores it when the
+// pointer is over empty space): always radial, towards/away from the Earth's centre, wherever you pinch.
+scene.screenSpaceCameraController.enableZoom = false;
+(function radialZoom() {
+  const R = Cesium.Ellipsoid.WGS84.maximumRadius;
+  const MIN_H = 30000; const MAX_H = 40000000; // camera height above the surface, metres
+  const canvas = scene.canvas;
+  const zoomBy = (factor) => { // factor < 1 zooms in
+    const cam = viewer.camera;
+    const h = Math.max(Cesium.Cartesian3.magnitude(cam.positionWC) - R, 1);
+    const nh = Math.min(MAX_H, Math.max(MIN_H, h * factor));
+    if (Math.abs(nh - h) < 1) return;
+    cam.move(cam.directionWC, h - nh);
+    scene.requestRender();
+  };
+  canvas.addEventListener('wheel', (e) => {
+    e.preventDefault();
+    const dy = e.deltaMode === 1 ? e.deltaY * 33 : e.deltaY;
+    zoomBy(Math.exp(Math.max(-300, Math.min(300, dy)) * 0.0015));
+  }, { passive: false });
+  const touches = new Map(); let last = 0;
+  const span = () => { const [a, b] = [...touches.values()]; return Math.hypot(a.x - b.x, a.y - b.y); };
+  canvas.addEventListener('pointerdown', (e) => {
+    if (e.pointerType !== 'touch') return;
+    touches.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    if (touches.size === 2) last = span();
+  });
+  canvas.addEventListener('pointermove', (e) => {
+    if (!touches.has(e.pointerId)) return;
+    touches.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    if (touches.size === 2) { const s = span(); if (last > 0 && s > 0) zoomBy(last / s); last = s; }
+  });
+  const end = (e) => { touches.delete(e.pointerId); if (touches.size === 2) last = span(); };
+  canvas.addEventListener('pointerup', end);
+  canvas.addEventListener('pointercancel', end);
+})();
 viewer.resolutionScale = Math.min(window.devicePixelRatio || 1, 2);
 
 let nightLayer = null;
